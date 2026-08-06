@@ -551,7 +551,7 @@ function cen_mlv_render_admin_page() {
 	?>
 	<div class="wrap cen-mlv-wrap">
 		<h1><?php esc_html_e( 'Member List Creator', 'cen-member-list-pdf' ); ?></h1>
-		<p class="cen-mlv-intro"><?php esc_html_e( 'Select one or more BuddyBoss groups, review the combined member list, remove anyone who should not appear, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
+		<p class="cen-mlv-intro"><?php esc_html_e( 'Select one or more national peer groups, review the combined member list, remove anyone who should not appear, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
 
 		<?php if ( ! $buddyboss_ready ) : ?>
 			<div class="notice notice-error"><p><?php esc_html_e( 'BuddyBoss Platform (or BuddyPress) with Groups enabled must be active.', 'cen-member-list-pdf' ); ?></p></div>
