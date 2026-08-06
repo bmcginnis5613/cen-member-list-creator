@@ -1,0 +1,171 @@
+.cen-mlv-wrap {
+	max-width: 1200px;
+}
+
+.cen-mlv-intro {
+	font-size: 14px;
+	max-width: 850px;
+}
+
+.cen-mlv-builder {
+	display: grid;
+	gap: 20px;
+	grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+	margin: 22px 0;
+}
+
+.cen-mlv-card {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+	box-sizing: border-box;
+	padding: 20px;
+}
+
+.cen-mlv-card h2 {
+	font-size: 17px;
+	margin: 0 0 10px;
+}
+
+.cen-mlv-groups {
+	box-sizing: border-box;
+	margin-top: 8px;
+	max-width: 100%;
+	min-height: 250px;
+	width: 100%;
+}
+
+.cen-mlv-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 14px 0 0;
+}
+
+.cen-mlv-status {
+	color: #b32d2e;
+	font-weight: 600;
+	min-height: 20px;
+	padding-top: 8px;
+}
+
+#cen-mlv-search {
+	box-sizing: border-box;
+	max-width: 100%;
+	width: 100%;
+}
+
+.cen-mlv-search-results {
+	background: #fff;
+	border: 1px solid #8c8f94;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+	margin-top: 8px;
+	max-height: 300px;
+	overflow-y: auto;
+	position: relative;
+	z-index: 10;
+}
+
+.cen-mlv-search-result {
+	align-items: center;
+	border-bottom: 1px solid #dcdcde;
+	display: flex;
+	gap: 12px;
+	justify-content: space-between;
+	padding: 9px 10px;
+}
+
+.cen-mlv-search-result:last-child {
+	border-bottom: 0;
+}
+
+.cen-mlv-search-empty {
+	margin: 0;
+	padding: 12px;
+}
+
+.cen-mlv-review {
+	padding: 0;
+}
+
+.cen-mlv-review-heading {
+	align-items: center;
+	display: flex;
+	gap: 20px;
+	justify-content: space-between;
+	padding: 20px;
+}
+
+.cen-mlv-review-heading p {
+	margin: 4px 0 0;
+}
+
+.cen-mlv-warning {
+	color: #996800;
+	font-weight: 600;
+}
+
+.cen-mlv-table-wrap {
+	overflow-x: auto;
+}
+
+.cen-mlv-table-wrap .widefat {
+	border-left: 0;
+	border-right: 0;
+	border-bottom: 0;
+}
+
+.cen-mlv-table-wrap th,
+.cen-mlv-table-wrap td {
+	vertical-align: middle;
+}
+
+.cen-mlv-email {
+	color: #646970;
+	display: block;
+	font-size: 12px;
+	margin-top: 3px;
+}
+
+.cen-mlv-source {
+	max-width: 300px;
+}
+
+.cen-mlv-user-id-column {
+	text-align: center;
+	white-space: nowrap;
+	width: 80px;
+}
+
+.cen-mlv-description {
+	line-height: 1.45;
+	min-width: 280px;
+}
+
+.cen-mlv-missing-company,
+.cen-mlv-missing-description {
+	color: #b32d2e;
+	font-style: italic;
+}
+
+.cen-mlv-remove-column {
+	text-align: right;
+	width: 90px;
+}
+
+.cen-mlv-empty-row td {
+	color: #646970;
+	padding: 28px 12px;
+	text-align: center;
+}
+
+@media (max-width: 782px) {
+	.cen-mlv-builder {
+		grid-template-columns: 1fr;
+	}
+
+	.cen-mlv-review-heading {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+}
