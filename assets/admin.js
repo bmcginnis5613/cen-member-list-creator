@@ -7,6 +7,10 @@
 	const loadStatus = document.getElementById('cen-mlv-load-status');
 	const searchInput = document.getElementById('cen-mlv-search');
 	const searchResults = document.getElementById('cen-mlv-search-results');
+	const manualCompanyName = document.getElementById('cen-mlv-manual-company-name');
+	const manualCompanyDescription = document.getElementById('cen-mlv-manual-company-description');
+	const addCompanyButton = document.getElementById('cen-mlv-add-company');
+	const manualCompanyStatus = document.getElementById('cen-mlv-manual-company-status');
 	const memberBody = document.getElementById('cen-mlv-members');
 	const countLabel = document.getElementById('cen-mlv-count');
 	const companyWarning = document.getElementById('cen-mlv-company-warning');
@@ -21,7 +25,9 @@
 
 	let groupMembers = new Map();
 	let manualMembers = new Map();
+	let manualCompanies = new Map();
 	let excludedIds = new Set();
+	let nextManualCompanyId = 1;
 	let searchTimer;
 	let searchRequest = 0;
 	let loadRequest = 0;
@@ -45,6 +51,9 @@
 			} else {
 				combined.set(id, member);
 			}
+		});
+		manualCompanies.forEach(function (company, id) {
+			if (!excludedIds.has(id)) combined.set(id, company);
 		});
 
 		return Array.from(combined.values()).sort(function (left, right) {
@@ -88,13 +97,15 @@
 			return;
 		}
 
-		members.forEach(function (member) {
+		members.forEach(function (member, index) {
 			const row = document.createElement('tr');
 			row.dataset.memberId = member.id;
 
 			const userIdCell = document.createElement('td');
 			userIdCell.className = 'cen-mlv-user-id-column';
-			if (member.editUrl) {
+			if (member.manualCompany) {
+				userIdCell.textContent = '\u2014';
+			} else if (member.editUrl) {
 				const editLink = document.createElement('a');
 				editLink.href = member.editUrl;
 				editLink.textContent = member.id;
@@ -120,7 +131,9 @@
 			row.appendChild(makeTextCell(member.company, member.company ? '' : 'cen-mlv-missing-company'));
 			row.appendChild(makeTextCell(member.description, member.description ? 'cen-mlv-description' : 'cen-mlv-description cen-mlv-missing-description'));
 
-			const source = member.groups && member.groups.length ? member.groups.join(', ') : CEN_MLV.strings.addedIndividually;
+			const source = member.manualCompany
+				? CEN_MLV.strings.enteredManually
+				: (member.groups && member.groups.length ? member.groups.join(', ') : CEN_MLV.strings.addedIndividually);
 			row.appendChild(makeTextCell(source, 'cen-mlv-source'));
 
 			const actionCell = document.createElement('td');
@@ -133,17 +146,32 @@
 				const id = String(member.id);
 				excludedIds.add(id);
 				manualMembers.delete(id);
+				manualCompanies.delete(id);
 				renderMembers();
 			});
 			actionCell.appendChild(removeButton);
 			row.appendChild(actionCell);
 			memberBody.appendChild(row);
 
-			const field = document.createElement('input');
-			field.type = 'hidden';
-			field.name = 'member_ids[]';
-			field.value = member.id;
-			downloadFields.appendChild(field);
+			if (member.manualCompany) {
+				const companyField = document.createElement('input');
+				companyField.type = 'hidden';
+				companyField.name = 'manual_companies[' + index + '][company]';
+				companyField.value = member.company;
+				downloadFields.appendChild(companyField);
+
+				const descriptionField = document.createElement('input');
+				descriptionField.type = 'hidden';
+				descriptionField.name = 'manual_companies[' + index + '][description]';
+				descriptionField.value = member.description;
+				downloadFields.appendChild(descriptionField);
+			} else {
+				const field = document.createElement('input');
+				field.type = 'hidden';
+				field.name = 'member_ids[]';
+				field.value = member.id;
+				downloadFields.appendChild(field);
+			}
 		});
 
 		selectedGroupNumbers().forEach(function (groupNumber) {
@@ -226,14 +254,55 @@
 		searchRequest++;
 		groupMembers = new Map();
 		manualMembers = new Map();
+		manualCompanies = new Map();
 		excludedIds = new Set();
+		nextManualCompanyId = 1;
 		Array.from(groupSelect.options).forEach(function (option) { option.selected = false; });
 		groupSelect.dispatchEvent(new Event('change', { bubbles: true }));
 		searchInput.value = '';
+		manualCompanyName.value = '';
+		manualCompanyDescription.value = '';
+		manualCompanyStatus.textContent = '';
+		manualCompanyStatus.classList.remove('is-success');
 		loadButton.disabled = false;
 		loadStatus.textContent = '';
 		closeSearchResults();
 		renderMembers();
+	});
+
+	addCompanyButton.addEventListener('click', function () {
+		const company = manualCompanyName.value.trim();
+		const description = manualCompanyDescription.value.trim();
+		if (!company) {
+			manualCompanyStatus.textContent = CEN_MLV.strings.companyRequired;
+			manualCompanyStatus.classList.remove('is-success');
+			manualCompanyName.focus();
+			return;
+		}
+		if (!description) {
+			manualCompanyStatus.textContent = CEN_MLV.strings.descriptionRequired;
+			manualCompanyStatus.classList.remove('is-success');
+			manualCompanyDescription.focus();
+			return;
+		}
+
+		const id = 'manual-company-' + nextManualCompanyId++;
+		manualCompanies.set(id, {
+			id: id,
+			manualCompany: true,
+			name: CEN_MLV.strings.manualCompany,
+			email: '',
+			company: company,
+			description: description,
+			groups: []
+		});
+		excludedIds.delete(id);
+		manualCompanyName.value = '';
+		manualCompanyDescription.value = '';
+		manualCompanyStatus.textContent = CEN_MLV.strings.companyAdded;
+		manualCompanyStatus.classList.add('is-success');
+		renderMembers();
+		manualCompanyName.focus();
 	});
 
 	searchInput.addEventListener('input', function () {

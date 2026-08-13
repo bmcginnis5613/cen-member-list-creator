@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: CEN Member List Creator
- * Description: Build a reviewable membership roster from user profile group numbers and download it as a PDF.
- * Version: 1.2.0
+ * Description: Build a reviewable membership roster from user profiles and manual company entries, then download it as a PDF.
+ * Version: 1.3.0
  * Author: FirstTracks Marketing
  * Author URI: https://firsttracksmarketing.com
  */
@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CEN_MLV_VERSION', '1.2.0' );
+define( 'CEN_MLV_VERSION', '1.3.0' );
 define( 'CEN_MLV_PLUGIN_FILE', __FILE__ );
 define( 'CEN_MLV_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'CEN_MLV_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -77,14 +77,19 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 				'loadError'         => __( 'The selected groups could not be loaded.', 'cen-member-list-pdf' ),
 				'searchError'       => __( 'Member search failed.', 'cen-member-list-pdf' ),
 				'chooseGroup'       => __( 'Select at least one group number.', 'cen-member-list-pdf' ),
-				'empty'             => __( 'No members are selected yet.', 'cen-member-list-pdf' ),
-				'oneMember'         => __( '1 member selected', 'cen-member-list-pdf' ),
-				'manyMembers'       => __( '%d members selected', 'cen-member-list-pdf' ),
+				'empty'             => __( 'No members or companies are selected yet.', 'cen-member-list-pdf' ),
+				'oneMember'         => __( '1 list entry selected', 'cen-member-list-pdf' ),
+				'manyMembers'       => __( '%d list entries selected', 'cen-member-list-pdf' ),
 				'oneMissingCompany' => __( '1 selected member has no company.', 'cen-member-list-pdf' ),
 				'manyMissingCompany' => __( '%d selected members have no company.', 'cen-member-list-pdf' ),
 				'oneMissingDescription' => __( '1 selected member has no company description.', 'cen-member-list-pdf' ),
 				'manyMissingDescription' => __( '%d selected members have no company description.', 'cen-member-list-pdf' ),
 				'addedIndividually' => __( 'Added individually', 'cen-member-list-pdf' ),
+				'enteredManually'   => __( 'Entered manually', 'cen-member-list-pdf' ),
+				'manualCompany'     => __( 'Manual company', 'cen-member-list-pdf' ),
+				'companyRequired'   => __( 'Enter a company name.', 'cen-member-list-pdf' ),
+				'descriptionRequired' => __( 'Enter a company description.', 'cen-member-list-pdf' ),
+				'companyAdded'      => __( 'Company added to the list.', 'cen-member-list-pdf' ),
 				'alreadyAdded'      => __( 'Already added', 'cen-member-list-pdf' ),
 				'add'               => __( 'Add', 'cen-member-list-pdf' ),
 				'remove'            => __( 'Remove', 'cen-member-list-pdf' ),
@@ -615,6 +620,38 @@ function cen_mlv_dedupe_pdf_rows( $rows ) {
 }
 
 /**
+ * Read and sanitize companies entered directly on the roster builder.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function cen_mlv_get_posted_manual_companies() {
+	$posted_companies = isset( $_POST['manual_companies'] ) ? (array) wp_unslash( $_POST['manual_companies'] ) : array();
+	$rows = array();
+
+	foreach ( array_slice( $posted_companies, 0, 500 ) as $company ) {
+		if ( ! is_array( $company ) ) {
+			continue;
+		}
+
+		$name = isset( $company['company'] ) ? cen_mlv_clean_text( $company['company'] ) : '';
+		$description = isset( $company['description'] ) ? cen_mlv_clean_text( $company['description'] ) : '';
+		if ( '' === $name || '' === $description ) {
+			continue;
+		}
+
+		$rows[] = array(
+			'user_id'     => 0,
+			'member_name' => '',
+			'company'     => function_exists( 'mb_substr' ) ? mb_substr( $name, 0, 200 ) : substr( $name, 0, 200 ),
+			'description' => function_exists( 'mb_substr' ) ? mb_substr( $description, 0, 5000 ) : substr( $description, 0, 5000 ),
+			'manual'      => true,
+		);
+	}
+
+	return $rows;
+}
+
+/**
  * Render the Tools screen.
  */
 function cen_mlv_render_admin_page() {
@@ -626,7 +663,7 @@ function cen_mlv_render_admin_page() {
 	?>
 	<div class="wrap cen-mlv-wrap">
 		<h1><?php esc_html_e( 'Member List Creator', 'cen-member-list-pdf' ); ?></h1>
-		<p class="cen-mlv-intro"><?php esc_html_e( 'Select one or more profile group numbers, review the combined eligible member list, remove anyone who should not appear, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
+		<p class="cen-mlv-intro"><?php esc_html_e( 'Select profile group numbers, add individual members or companies, review the combined list, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
 
 		<?php if ( empty( $group_numbers ) ) : ?>
 			<div class="notice notice-warning"><p><?php esc_html_e( 'No group-number choices are configured.', 'cen-member-list-pdf' ); ?></p></div>
@@ -673,13 +710,28 @@ function cen_mlv_render_admin_page() {
 				<p class="description"><?php esc_html_e( 'Type at least two characters, then add members one at a time.', 'cen-member-list-pdf' ); ?></p>
 				<div id="cen-mlv-search-results" class="cen-mlv-search-results" role="listbox" hidden></div>
 			</section>
+
+			<section class="cen-mlv-card" aria-labelledby="cen-mlv-manual-company-heading">
+				<h2 id="cen-mlv-manual-company-heading"><?php esc_html_e( '3. Add a company manually', 'cen-member-list-pdf' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Use this for a company that is not associated with a member in the database.', 'cen-member-list-pdf' ); ?></p>
+				<div class="cen-mlv-manual-company-fields">
+					<label for="cen-mlv-manual-company-name"><?php esc_html_e( 'Company name', 'cen-member-list-pdf' ); ?></label>
+					<input type="text" id="cen-mlv-manual-company-name" maxlength="200" autocomplete="organization">
+					<label for="cen-mlv-manual-company-description"><?php esc_html_e( 'Company description', 'cen-member-list-pdf' ); ?></label>
+					<textarea id="cen-mlv-manual-company-description" rows="5" maxlength="5000"></textarea>
+				</div>
+				<p class="cen-mlv-actions">
+					<button type="button" class="button button-primary" id="cen-mlv-add-company"><?php esc_html_e( 'Add company to list', 'cen-member-list-pdf' ); ?></button>
+				</p>
+				<div id="cen-mlv-manual-company-status" class="cen-mlv-status" role="status" aria-live="polite"></div>
+			</section>
 		</div>
 
 		<section class="cen-mlv-card cen-mlv-review" aria-labelledby="cen-mlv-review-heading">
 			<div class="cen-mlv-review-heading">
 				<div>
-					<h2 id="cen-mlv-review-heading"><?php esc_html_e( '3. Review members', 'cen-member-list-pdf' ); ?></h2>
-					<p id="cen-mlv-count" class="description"><?php esc_html_e( 'No members are selected yet.', 'cen-member-list-pdf' ); ?></p>
+					<h2 id="cen-mlv-review-heading"><?php esc_html_e( '4. Review list', 'cen-member-list-pdf' ); ?></h2>
+					<p id="cen-mlv-count" class="description"><?php esc_html_e( 'No members or companies are selected yet.', 'cen-member-list-pdf' ); ?></p>
 					<p id="cen-mlv-company-warning" class="cen-mlv-warning" hidden></p>
 					<p id="cen-mlv-description-warning" class="cen-mlv-warning" hidden></p>
 				</div>
@@ -696,7 +748,7 @@ function cen_mlv_render_admin_page() {
 					<thead>
 						<tr>
 							<th scope="col" class="cen-mlv-user-id-column"><?php esc_html_e( 'ID', 'cen-member-list-pdf' ); ?></th>
-							<th scope="col"><?php esc_html_e( 'Member', 'cen-member-list-pdf' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Member / Entry', 'cen-member-list-pdf' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Company', 'cen-member-list-pdf' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Company Description', 'cen-member-list-pdf' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Source', 'cen-member-list-pdf' ); ?></th>
@@ -704,7 +756,7 @@ function cen_mlv_render_admin_page() {
 						</tr>
 					</thead>
 					<tbody id="cen-mlv-members">
-						<tr class="cen-mlv-empty-row"><td colspan="6"><?php esc_html_e( 'No members are selected yet.', 'cen-member-list-pdf' ); ?></td></tr>
+						<tr class="cen-mlv-empty-row"><td colspan="6"><?php esc_html_e( 'No members or companies are selected yet.', 'cen-member-list-pdf' ); ?></td></tr>
 					</tbody>
 				</table>
 			</div>
@@ -724,11 +776,12 @@ function cen_mlv_handle_pdf_download() {
 
 	$raw_member_ids = isset( $_POST['member_ids'] ) ? (array) wp_unslash( $_POST['member_ids'] ) : array();
 	$member_ids = array_slice( array_values( array_unique( array_filter( array_map( 'absint', $raw_member_ids ) ) ) ), 0, 2000 );
-	if ( empty( $member_ids ) ) {
-		wp_die( esc_html__( 'Select at least one member before downloading the PDF.', 'cen-member-list-pdf' ), '', array( 'back_link' => true ) );
+	$manual_companies = cen_mlv_get_posted_manual_companies();
+	if ( empty( $member_ids ) && empty( $manual_companies ) ) {
+		wp_die( esc_html__( 'Add at least one member or company before downloading the PDF.', 'cen-member-list-pdf' ), '', array( 'back_link' => true ) );
 	}
 
-	$rows = array();
+	$rows = $manual_companies;
 	foreach ( $member_ids as $member_id ) {
 		$user = get_userdata( $member_id );
 		if ( ! $user || ! cen_mlv_is_user_eligible( $member_id ) ) {
@@ -742,10 +795,10 @@ function cen_mlv_handle_pdf_download() {
 		);
 	}
 
-	$rows = apply_filters( 'cen_mlv_pdf_rows', $rows, $member_ids );
+	$rows = apply_filters( 'cen_mlv_pdf_rows', $rows, $member_ids, $manual_companies );
 	$rows = cen_mlv_dedupe_pdf_rows( $rows );
 	if ( empty( $rows ) ) {
-		wp_die( esc_html__( 'No valid members remained for the PDF.', 'cen-member-list-pdf' ), '', array( 'back_link' => true ) );
+		wp_die( esc_html__( 'No valid members or companies remained for the PDF.', 'cen-member-list-pdf' ), '', array( 'back_link' => true ) );
 	}
 	usort(
 		$rows,

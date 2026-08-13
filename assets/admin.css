@@ -10,7 +10,7 @@
 .cen-mlv-builder {
 	display: grid;
 	gap: 20px;
-	grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 	margin: 22px 0;
 }
 
@@ -64,6 +64,28 @@
 }
 
 #cen-mlv-search {
+	box-sizing: border-box;
+	max-width: 100%;
+	width: 100%;
+}
+
+.cen-mlv-status.is-success {
+	color: #008a20;
+}
+
+.cen-mlv-manual-company-fields {
+	display: grid;
+	gap: 6px;
+	margin-top: 14px;
+}
+
+.cen-mlv-manual-company-fields label {
+	font-weight: 600;
+	margin-top: 4px;
+}
+
+.cen-mlv-manual-company-fields input,
+.cen-mlv-manual-company-fields textarea {
 	box-sizing: border-box;
 	max-width: 100%;
 	width: 100%;
