@@ -26,7 +26,7 @@
 	let searchRequest = 0;
 	let loadRequest = 0;
 
-	function selectedGroupIds() {
+	function selectedGroupNumbers() {
 		return Array.from(groupSelect.selectedOptions).map(function (option) {
 			return String(option.value);
 		});
@@ -146,11 +146,11 @@
 			downloadFields.appendChild(field);
 		});
 
-		selectedGroupIds().forEach(function (groupId) {
+		selectedGroupNumbers().forEach(function (groupNumber) {
 			const field = document.createElement('input');
 			field.type = 'hidden';
-			field.name = 'group_ids[]';
-			field.value = groupId;
+			field.name = 'group_numbers[]';
+			field.value = groupNumber;
 			downloadFields.appendChild(field);
 		});
 
@@ -192,8 +192,8 @@
 	}
 
 	loadButton.addEventListener('click', function () {
-		const groupIds = selectedGroupIds();
-		if (!groupIds.length) {
+		const groupNumbers = selectedGroupNumbers();
+		if (!groupNumbers.length) {
 			loadStatus.textContent = CEN_MLV.strings.chooseGroup;
 			return;
 		}
@@ -202,7 +202,7 @@
 		const url = new URL(CEN_MLV.ajaxUrl);
 		url.searchParams.set('action', 'cen_mlv_load_members');
 		url.searchParams.set('nonce', CEN_MLV.loadNonce);
-		groupIds.forEach(function (groupId) { url.searchParams.append('group_ids[]', groupId); });
+		groupNumbers.forEach(function (groupNumber) { url.searchParams.append('group_numbers[]', groupNumber); });
 		loadButton.disabled = true;
 		loadStatus.textContent = CEN_MLV.strings.loading;
 
@@ -228,6 +228,7 @@
 		manualMembers = new Map();
 		excludedIds = new Set();
 		Array.from(groupSelect.options).forEach(function (option) { option.selected = false; });
+		groupSelect.dispatchEvent(new Event('change', { bubbles: true }));
 		searchInput.value = '';
 		loadButton.disabled = false;
 		loadStatus.textContent = '';

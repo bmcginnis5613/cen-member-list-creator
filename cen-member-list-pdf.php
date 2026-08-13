@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: CEN Member List Creator
- * Description: Build a reviewable membership roster from multiple national peer groups and download it as a PDF.
- * Version: 1.0.0
+ * Description: Build a reviewable membership roster from user profile group numbers and download it as a PDF.
+ * Version: 1.2.0
  * Author: FirstTracks Marketing
  * Author URI: https://firsttracksmarketing.com
  */
@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CEN_MLV_VERSION', '1.0.7' );
+define( 'CEN_MLV_VERSION', '1.2.0' );
 define( 'CEN_MLV_PLUGIN_FILE', __FILE__ );
 define( 'CEN_MLV_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'CEN_MLV_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -47,6 +47,11 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 		return;
 	}
 
+	// Load ACF's Select2-based field UI for the group-number multi-select.
+	if ( function_exists( 'acf_enqueue_scripts' ) ) {
+		acf_enqueue_scripts();
+	}
+
 	wp_enqueue_style(
 		'cen-mlv-admin',
 		CEN_MLV_PLUGIN_URL . 'assets/admin.css',
@@ -71,7 +76,7 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 				'loading'           => __( 'Loading members...', 'cen-member-list-pdf' ),
 				'loadError'         => __( 'The selected groups could not be loaded.', 'cen-member-list-pdf' ),
 				'searchError'       => __( 'Member search failed.', 'cen-member-list-pdf' ),
-				'chooseGroup'       => __( 'Select at least one national peer group.', 'cen-member-list-pdf' ),
+				'chooseGroup'       => __( 'Select at least one group number.', 'cen-member-list-pdf' ),
 				'empty'             => __( 'No members are selected yet.', 'cen-member-list-pdf' ),
 				'oneMember'         => __( '1 member selected', 'cen-member-list-pdf' ),
 				'manyMembers'       => __( '%d members selected', 'cen-member-list-pdf' ),
@@ -91,86 +96,62 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 }
 
 /**
- * Use the conflict sender's group map when it is active, with a standalone
- * copy so this plugin also works by itself.
+ * Return the selectable ACF group numbers.
  *
  * @return array<string,string>
  */
-function cen_mlv_get_allowed_group_codes() {
-	if ( function_exists( 'cen_ccs_get_allowed_group_codes' ) ) {
-		$codes = cen_ccs_get_allowed_group_codes();
-	} else {
-		$codes = array(
-			'Architectural Firm Owners & Managing Partners'   => '20AX',
-			'Architecture & Engineering Finance Executives'    => '10AE',
-			'CEO100'                                           => 'CEO100',
-			'CEO50'                                            => 'CEO50',
-			'CFO100'                                           => 'CFO100',
-			'Chief Strategy & Corporate Development Officers'  => '20VP',
-			'Construction Senior Finance Executives'            => '10XC',
-			'Controllers'                                      => '1XXCO',
-			'Engineering Firm Owners & Managing Partners'       => '20EX',
-			'General Contractor Firm Owners & CEOs'             => '20GC',
-			'General Managers & Division Presidents'            => '20GM',
-			'HR Executives'                                    => '10HR',
-			'IT Executives'                                    => '10XCIO',
-			'Manufacturing Presidents & CEOs (Large)'           => '500M',
-			'Manufacturing Presidents & CEOs (Small to Medium)' => '2XXM',
-			'Manufacturing Senior Finance Executives'           => '1XXM',
-			'Marketing & Business Development Executives'       => '5MBD',
-			'Operations Executives'                            => '10XVM',
-			'R&D and Engineering Executives'                   => '10RD',
-			'Sales Executives'                                 => '5XM',
-			'Sub Contractor Firm Owners & CEOs'                 => '20XC',
-			'Supply Chain & Purchasing Executives'              => '10SC',
-			'Technology & Software Executives'                  => '21XPS',
+function cen_mlv_get_group_number_options() {
+	$field_key = (string) apply_filters( 'cen_mlv_group_number_acf_field_key', 'field_6a7ddc6aed794' );
+	$options = array();
+
+	if ( function_exists( 'get_field_object' ) && '' !== $field_key ) {
+		$field = get_field_object( $field_key, false, false, false );
+		if ( is_array( $field ) && isset( $field['choices'] ) && is_array( $field['choices'] ) ) {
+			$options = $field['choices'];
+		}
+	}
+
+	if ( empty( $options ) ) {
+		$numbers = array(
+			'10AE', '10HR', '10SC', '10XC', '10XCIO', '10XEM', '10XM', '10XVM', '11XM',
+			'1XXCO', '20AX', '20EX', '20GC', '20GM', '20VP', '20XC', '20XM', '21XM',
+			'21XPS', '500M', '5MBD', '5XM', 'CEO100', 'CEO50', 'CFO100',
 		);
+		$options = array_combine( $numbers, $numbers );
 	}
 
-	return apply_filters( 'cen_mlv_allowed_group_codes', $codes );
-}
-
-/**
- * Return the existing BuddyBoss groups from the shared allowlist.
- *
- * @return array<int,object>
- */
-function cen_mlv_get_allowed_groups() {
-	if ( ! function_exists( 'groups_get_groups' ) ) {
-		return array();
-	}
-
-	$result = groups_get_groups(
-		array(
-			'show_hidden' => true,
-			'per_page'    => false,
-			'page'        => false,
-		)
-	);
-	$groups = isset( $result['groups'] ) && is_array( $result['groups'] ) ? $result['groups'] : array();
-	$allowed_names = array_fill_keys( array_keys( cen_mlv_get_allowed_group_codes() ), true );
-	$allowed = array();
-
-	foreach ( $groups as $group ) {
-		$group_id = isset( $group->id ) ? absint( $group->id ) : 0;
-		$name = isset( $group->name ) ? cen_mlv_clean_text( $group->name ) : '';
-		if ( $group_id && isset( $allowed_names[ $name ] ) ) {
-			$allowed[ $group_id ] = $group;
+	$clean_options = array();
+	foreach ( (array) apply_filters( 'cen_mlv_group_number_options', $options ) as $value => $label ) {
+		$number = cen_mlv_normalize_group_number( is_int( $value ) ? $label : $value );
+		if ( '' === $number ) {
+			continue;
 		}
-	}
 
-	uasort(
-		$allowed,
+		$clean_label = cen_mlv_clean_text( $label );
+		if ( '' === $clean_label ) {
+			$clean_label = $number;
+		}
+		$clean_options[ $number ] = $clean_label;
+	}
+	uksort(
+		$clean_options,
 		static function ( $left, $right ) {
-			return strcasecmp( (string) $left->name, (string) $right->name );
+			$sort_keys = array(
+				'10XM' => '10XM-0',
+				'11XM' => '10XM-1',
+			);
+			$left_key = isset( $sort_keys[ $left ] ) ? $sort_keys[ $left ] : $left;
+			$right_key = isset( $sort_keys[ $right ] ) ? $sort_keys[ $right ] : $right;
+
+			return strnatcasecmp( $left_key, $right_key );
 		}
 	);
 
-	return $allowed;
+	return $clean_options;
 }
 
 /**
- * Normalize a BuddyBoss/WordPress text value for display and export.
+ * Normalize a WordPress text value for display and export.
  *
  * @param mixed $value Source value.
  * @return string
@@ -184,17 +165,107 @@ function cen_mlv_clean_text( $value ) {
 }
 
 /**
- * Determine whether BuddyBoss has suspended a user.
+ * Normalize a group number stored in the user profile.
+ *
+ * @param mixed $value Group number.
+ * @return string
+ */
+function cen_mlv_normalize_group_number( $value ) {
+	$number = strtoupper( cen_mlv_clean_text( $value ) );
+
+	return (string) preg_replace( '/[^A-Z0-9_-]/', '', $number );
+}
+
+/**
+ * Read a raw ACF user value, with a user-meta fallback.
+ *
+ * @param int    $user_id   User ID.
+ * @param string $field_name ACF field name/user-meta key.
+ * @param string $field_key  ACF field key.
+ * @return mixed
+ */
+function cen_mlv_get_acf_user_value( $user_id, $field_name, $field_key ) {
+	$user_id = absint( $user_id );
+	if ( ! $user_id ) {
+		return '';
+	}
+
+	$value = get_user_meta( $user_id, $field_name, true );
+	if ( '' !== $value && null !== $value && false !== $value && array() !== $value ) {
+		return $value;
+	}
+
+	if ( function_exists( 'get_field' ) && '' !== $field_key ) {
+		$value = get_field( $field_key, 'user_' . $user_id, false );
+		if ( null !== $value && false !== $value ) {
+			return $value;
+		}
+	}
+
+	return '';
+}
+
+/**
+ * Return all ACF group numbers assigned to a user.
+ *
+ * @param int $user_id User ID.
+ * @return string[]
+ */
+function cen_mlv_get_user_group_numbers( $user_id ) {
+	$field_name = (string) apply_filters( 'cen_mlv_group_number_meta_key', 'group_number' );
+	$field_key = (string) apply_filters( 'cen_mlv_group_number_acf_field_key', 'field_6a7ddc6aed794' );
+	$value = cen_mlv_get_acf_user_value( $user_id, $field_name, $field_key );
+	$value = is_string( $value ) ? maybe_unserialize( $value ) : $value;
+	$raw_numbers = array();
+
+	if ( is_array( $value ) ) {
+		array_walk_recursive(
+			$value,
+			static function ( $number ) use ( &$raw_numbers ) {
+				$raw_numbers[] = $number;
+			}
+		);
+	} elseif ( is_scalar( $value ) ) {
+		$raw_numbers = preg_split( '/[\s,]+/', (string) $value );
+	}
+
+	$numbers = array_values( array_unique( array_filter( array_map( 'cen_mlv_normalize_group_number', $raw_numbers ) ) ) );
+
+	return (array) apply_filters( 'cen_mlv_user_group_numbers', $numbers, absint( $user_id ) );
+}
+
+/**
+ * Return the user's ACF member type.
+ *
+ * @param int $user_id User ID.
+ * @return string
+ */
+function cen_mlv_get_user_member_type( $user_id ) {
+	$field_name = (string) apply_filters( 'cen_mlv_member_type_meta_key', 'member_type' );
+	$field_key = (string) apply_filters( 'cen_mlv_member_type_acf_field_key', 'field_6a7c995f271bd' );
+	$member_type = cen_mlv_clean_text( cen_mlv_get_acf_user_value( $user_id, $field_name, $field_key ) );
+
+	return (string) apply_filters( 'cen_mlv_user_member_type', $member_type, absint( $user_id ) );
+}
+
+/**
+ * Determine whether a user may appear in the roster builder or PDF.
+ *
+ * Prospects and users without a member type are excluded. BuddyBoss
+ * suspension status does not affect roster eligibility.
  *
  * @param int $user_id User ID.
  * @return bool
  */
-function cen_mlv_is_user_suspended( $user_id ) {
-	if ( function_exists( 'cen_ccs_is_user_suspended' ) ) {
-		return cen_ccs_is_user_suspended( $user_id );
-	}
+function cen_mlv_is_user_eligible( $user_id ) {
+	$user_id = absint( $user_id );
+	$member_type = cen_mlv_get_user_member_type( $user_id );
+	$eligible = $user_id
+		&& '' !== $member_type
+		&& 0 !== strcasecmp( 'Prospect', $member_type )
+		&& 0 !== strcasecmp( 'Null', $member_type );
 
-	return function_exists( 'bp_moderation_is_user_suspended' ) && bp_moderation_is_user_suspended( absint( $user_id ) );
+	return (bool) apply_filters( 'cen_mlv_is_user_eligible', $eligible, $user_id, $member_type );
 }
 
 /**
@@ -392,53 +463,56 @@ function cen_mlv_verify_ajax_request( $nonce_action ) {
 }
 
 /**
- * Load and merge members from all selected BuddyBoss groups.
+ * Load and merge members assigned to the selected ACF group numbers.
  */
 function cen_mlv_ajax_load_members() {
 	cen_mlv_verify_ajax_request( 'cen_mlv_load_members' );
 
-	if ( ! function_exists( 'groups_get_group_members' ) ) {
-		wp_send_json_error( array( 'message' => __( 'BuddyBoss Platform (or BuddyPress) Groups is not available.', 'cen-member-list-pdf' ) ), 400 );
+	$requested_numbers = isset( $_GET['group_numbers'] ) ? (array) wp_unslash( $_GET['group_numbers'] ) : array();
+	$requested_numbers = array_values( array_unique( array_filter( array_map( 'cen_mlv_normalize_group_number', $requested_numbers ) ) ) );
+	$allowed_numbers = array_keys( cen_mlv_get_group_number_options() );
+	$group_numbers = array_values( array_intersect( $requested_numbers, $allowed_numbers ) );
+	if ( empty( $group_numbers ) ) {
+		wp_send_json_error( array( 'message' => __( 'Select at least one valid group number.', 'cen-member-list-pdf' ) ), 400 );
 	}
 
-	$requested_ids = isset( $_GET['group_ids'] ) ? (array) wp_unslash( $_GET['group_ids'] ) : array();
-	$requested_ids = array_values( array_unique( array_filter( array_map( 'absint', $requested_ids ) ) ) );
-	$allowed_groups = cen_mlv_get_allowed_groups();
-	$group_ids = array_values( array_intersect( $requested_ids, array_keys( $allowed_groups ) ) );
-	if ( empty( $group_ids ) ) {
-		wp_send_json_error( array( 'message' => __( 'Select at least one valid BuddyBoss group.', 'cen-member-list-pdf' ) ), 400 );
-	}
-
-	$member_groups = array();
-	foreach ( $group_ids as $group_id ) {
-		$result = groups_get_group_members(
-			array(
-				'group_id'       => $group_id,
-				'per_page'       => false,
-				'page'           => false,
-				'exclude_banned' => true,
-			)
+	$group_meta_query = array( 'relation' => 'OR' );
+	$group_meta_key = (string) apply_filters( 'cen_mlv_group_number_meta_key', 'group_number' );
+	foreach ( $group_numbers as $group_number ) {
+		// ACF multi-selects are serialized; equality also supports legacy scalar values.
+		$group_meta_query[] = array(
+			'key'     => $group_meta_key,
+			'value'   => '"' . $group_number . '"',
+			'compare' => 'LIKE',
 		);
-		$members = isset( $result['members'] ) && is_array( $result['members'] ) ? $result['members'] : array();
-		$group_name = cen_mlv_clean_text( $allowed_groups[ $group_id ]->name );
-
-		foreach ( $members as $member ) {
-			$user_id = isset( $member->ID ) ? absint( $member->ID ) : 0;
-			if ( ! $user_id || cen_mlv_is_user_suspended( $user_id ) ) {
-				continue;
-			}
-			if ( ! isset( $member_groups[ $user_id ] ) ) {
-				$member_groups[ $user_id ] = array();
-			}
-			$member_groups[ $user_id ][] = $group_name;
-		}
+		$group_meta_query[] = array(
+			'key'     => $group_meta_key,
+			'value'   => $group_number,
+			'compare' => '=',
+		);
 	}
 
+	$query = new WP_User_Query(
+		array(
+			'orderby'     => 'display_name',
+			'order'       => 'ASC',
+			'fields'      => array( 'ID', 'display_name', 'user_email' ),
+			'count_total' => false,
+			'meta_query'  => $group_meta_query,
+		)
+	);
 	$items = array();
-	foreach ( $member_groups as $user_id => $group_names ) {
-		$user = get_userdata( $user_id );
-		if ( $user ) {
-			$items[] = cen_mlv_get_member_payload( $user, $group_names );
+	$seen_user_ids = array();
+	foreach ( $query->get_results() as $user ) {
+		$user_id = isset( $user->ID ) ? absint( $user->ID ) : 0;
+		if ( ! $user_id || isset( $seen_user_ids[ $user_id ] ) || ! cen_mlv_is_user_eligible( $user_id ) ) {
+			continue;
+		}
+
+		$matching_numbers = array_values( array_intersect( $group_numbers, cen_mlv_get_user_group_numbers( $user_id ) ) );
+		if ( ! empty( $matching_numbers ) ) {
+			$seen_user_ids[ $user_id ] = true;
+			$items[] = cen_mlv_get_member_payload( $user, $matching_numbers );
 		}
 	}
 	usort( $items, 'cen_mlv_compare_member_payloads' );
@@ -459,7 +533,7 @@ function cen_mlv_ajax_search_members() {
 
 	$query = new WP_User_Query(
 		array(
-			'number'         => 20,
+			'number'         => 50,
 			'orderby'        => 'display_name',
 			'order'          => 'ASC',
 			'search'         => '*' . $term . '*',
@@ -469,8 +543,11 @@ function cen_mlv_ajax_search_members() {
 	);
 	$items = array();
 	foreach ( $query->get_results() as $user ) {
-		if ( ! cen_mlv_is_user_suspended( $user->ID ) ) {
+		if ( cen_mlv_is_user_eligible( $user->ID ) ) {
 			$items[] = cen_mlv_get_member_payload( $user );
+			if ( 20 === count( $items ) ) {
+				break;
+			}
 		}
 	}
 
@@ -545,36 +622,45 @@ function cen_mlv_render_admin_page() {
 		wp_die( esc_html__( 'You are not allowed to create member-list PDFs.', 'cen-member-list-pdf' ) );
 	}
 
-	$groups = cen_mlv_get_allowed_groups();
-	$codes = cen_mlv_get_allowed_group_codes();
-	$buddyboss_ready = function_exists( 'groups_get_groups' ) && function_exists( 'groups_get_group_members' );
+	$group_numbers = cen_mlv_get_group_number_options();
 	?>
 	<div class="wrap cen-mlv-wrap">
 		<h1><?php esc_html_e( 'Member List Creator', 'cen-member-list-pdf' ); ?></h1>
-		<p class="cen-mlv-intro"><?php esc_html_e( 'Select one or more national peer groups, review the combined member list, remove anyone who should not appear, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
+		<p class="cen-mlv-intro"><?php esc_html_e( 'Select one or more profile group numbers, review the combined eligible member list, remove anyone who should not appear, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
 
-		<?php if ( ! $buddyboss_ready ) : ?>
-			<div class="notice notice-error"><p><?php esc_html_e( 'BuddyBoss Platform (or BuddyPress) with Groups enabled must be active.', 'cen-member-list-pdf' ); ?></p></div>
-		<?php elseif ( empty( $groups ) ) : ?>
-			<div class="notice notice-warning"><p><?php esc_html_e( 'None of the allowed BuddyBoss groups were found. Group names must match the shared CEN allowlist.', 'cen-member-list-pdf' ); ?></p></div>
+		<?php if ( empty( $group_numbers ) ) : ?>
+			<div class="notice notice-warning"><p><?php esc_html_e( 'No group-number choices are configured.', 'cen-member-list-pdf' ); ?></p></div>
 		<?php endif; ?>
 
 		<div class="cen-mlv-builder">
 			<section class="cen-mlv-card" aria-labelledby="cen-mlv-groups-heading">
-				<h2 id="cen-mlv-groups-heading"><?php esc_html_e( '1. Choose groups', 'cen-member-list-pdf' ); ?></h2>
-				<p class="description" id="cen-mlv-group-help"><?php esc_html_e( 'Use Ctrl (Windows) or Command (Mac) to select multiple groups.', 'cen-member-list-pdf' ); ?></p>
-				<select id="cen-mlv-groups" class="cen-mlv-groups" multiple size="12" aria-describedby="cen-mlv-group-help" <?php disabled( empty( $groups ) ); ?>>
-					<?php foreach ( $groups as $group_id => $group ) : ?>
-						<?php
-						$group_name = cen_mlv_clean_text( $group->name );
-						$code = isset( $codes[ $group_name ] ) ? (string) $codes[ $group_name ] : '';
-						$label = '' !== $code ? sprintf( '%1$s (%2$s)', $group_name, $code ) : $group_name;
-						?>
-						<option value="<?php echo esc_attr( $group_id ); ?>"><?php echo esc_html( $label ); ?></option>
-					<?php endforeach; ?>
-				</select>
+				<h2 id="cen-mlv-groups-heading"><?php esc_html_e( '1. Choose group numbers', 'cen-member-list-pdf' ); ?></h2>
+				<p class="description" id="cen-mlv-group-help"><?php esc_html_e( 'Search or click to add one or more values from the Group Number field.', 'cen-member-list-pdf' ); ?></p>
+				<div class="acf-field acf-field-select acf-field-6a7ddc6aed794 cen-mlv-group-number-field" data-name="group_number" data-type="select" data-key="field_6a7ddc6aed794">
+					<div class="acf-input">
+						<select
+							id="cen-mlv-groups"
+							class="cen-mlv-groups"
+							name="cen_mlv_group_numbers[]"
+							multiple
+							size="12"
+							data-ui="1"
+							data-multiple="1"
+							data-placeholder="<?php echo esc_attr__( 'Select group numbers', 'cen-member-list-pdf' ); ?>"
+							data-allow_null="1"
+							data-ajax="0"
+							aria-describedby="cen-mlv-group-help"
+							<?php disabled( empty( $group_numbers ) ); ?>
+						>
+							<?php foreach ( $group_numbers as $group_number => $label ) : ?>
+								<option value="<?php echo esc_attr( $group_number ); ?>"><?php echo esc_html( $label ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+				</div>
+				<p class="description"><?php esc_html_e( 'Prospects and users with no Member Type are excluded. BuddyBoss suspension status is ignored.', 'cen-member-list-pdf' ); ?></p>
 				<p class="cen-mlv-actions">
-					<button type="button" class="button button-primary" id="cen-mlv-load-groups" <?php disabled( empty( $groups ) ); ?>><?php esc_html_e( 'Load selected groups', 'cen-member-list-pdf' ); ?></button>
+					<button type="button" class="button button-primary" id="cen-mlv-load-groups" <?php disabled( empty( $group_numbers ) ); ?>><?php esc_html_e( 'Load selected group numbers', 'cen-member-list-pdf' ); ?></button>
 					<button type="button" class="button" id="cen-mlv-clear"><?php esc_html_e( 'Clear list', 'cen-member-list-pdf' ); ?></button>
 				</p>
 				<div id="cen-mlv-load-status" class="cen-mlv-status" role="status" aria-live="polite"></div>
@@ -645,7 +731,7 @@ function cen_mlv_handle_pdf_download() {
 	$rows = array();
 	foreach ( $member_ids as $member_id ) {
 		$user = get_userdata( $member_id );
-		if ( ! $user || cen_mlv_is_user_suspended( $member_id ) ) {
+		if ( ! $user || ! cen_mlv_is_user_eligible( $member_id ) ) {
 			continue;
 		}
 		$rows[] = array(

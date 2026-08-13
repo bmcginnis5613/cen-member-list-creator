@@ -29,10 +29,24 @@
 
 .cen-mlv-groups {
 	box-sizing: border-box;
-	margin-top: 8px;
 	max-width: 100%;
-	min-height: 250px;
 	width: 100%;
+}
+
+.cen-mlv-groups:not(.select2-hidden-accessible) {
+	min-height: 250px;
+}
+
+.cen-mlv-group-number-field.acf-field {
+	border: 0;
+	margin: 8px 0 0;
+	padding: 0;
+}
+
+.cen-mlv-group-number-field .acf-input,
+.cen-mlv-group-number-field .select2-container {
+	max-width: 100%;
+	width: 100% !important;
 }
 
 .cen-mlv-actions {
