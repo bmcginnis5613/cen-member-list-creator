@@ -2,6 +2,7 @@
 	'use strict';
 
 	const groupSelect = document.getElementById('cen-mlv-groups');
+	const localBoardSelect = document.getElementById('cen-mlv-local-boards');
 	const loadButton = document.getElementById('cen-mlv-load-groups');
 	const clearButton = document.getElementById('cen-mlv-clear');
 	const loadStatus = document.getElementById('cen-mlv-load-status');
@@ -19,7 +20,7 @@
 	const downloadForm = document.getElementById('cen-mlv-download-form');
 	const downloadFields = document.getElementById('cen-mlv-download-fields');
 
-	if (!groupSelect || !memberBody || !window.CEN_MLV) {
+	if (!groupSelect || !localBoardSelect || !memberBody || !window.CEN_MLV) {
 		return;
 	}
 
@@ -34,6 +35,12 @@
 
 	function selectedGroupNumbers() {
 		return Array.from(groupSelect.selectedOptions).map(function (option) {
+			return String(option.value);
+		});
+	}
+
+	function selectedLocalBoards() {
+		return Array.from(localBoardSelect.selectedOptions).map(function (option) {
 			return String(option.value);
 		});
 	}
@@ -221,8 +228,9 @@
 
 	loadButton.addEventListener('click', function () {
 		const groupNumbers = selectedGroupNumbers();
-		if (!groupNumbers.length) {
-			loadStatus.textContent = CEN_MLV.strings.chooseGroup;
+		const localBoards = selectedLocalBoards();
+		if (!groupNumbers.length && !localBoards.length) {
+			loadStatus.textContent = CEN_MLV.strings.chooseFilter;
 			return;
 		}
 
@@ -231,6 +239,7 @@
 		url.searchParams.set('action', 'cen_mlv_load_members');
 		url.searchParams.set('nonce', CEN_MLV.loadNonce);
 		groupNumbers.forEach(function (groupNumber) { url.searchParams.append('group_numbers[]', groupNumber); });
+		localBoards.forEach(function (localBoard) { url.searchParams.append('local_boards[]', localBoard); });
 		loadButton.disabled = true;
 		loadStatus.textContent = CEN_MLV.strings.loading;
 
@@ -259,6 +268,8 @@
 		nextManualCompanyId = 1;
 		Array.from(groupSelect.options).forEach(function (option) { option.selected = false; });
 		groupSelect.dispatchEvent(new Event('change', { bubbles: true }));
+		Array.from(localBoardSelect.options).forEach(function (option) { option.selected = false; });
+		localBoardSelect.dispatchEvent(new Event('change', { bubbles: true }));
 		searchInput.value = '';
 		manualCompanyName.value = '';
 		manualCompanyDescription.value = '';

@@ -49,6 +49,12 @@
 	width: 100% !important;
 }
 
+.cen-mlv-filter-label {
+	display: block;
+	font-weight: 600;
+	margin-top: 14px;
+}
+
 .cen-mlv-actions {
 	display: flex;
 	flex-wrap: wrap;

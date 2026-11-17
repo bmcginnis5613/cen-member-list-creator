@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CEN Member List Creator
  * Description: Build a reviewable membership roster from user profiles and manual company entries, then download it as a PDF.
- * Version: 1.3.0
+ * Version: 1.4.1
  * Author: FirstTracks Marketing
  * Author URI: https://firsttracksmarketing.com
  */
@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CEN_MLV_VERSION', '1.3.0' );
+define( 'CEN_MLV_VERSION', '1.4.1' );
 define( 'CEN_MLV_PLUGIN_FILE', __FILE__ );
 define( 'CEN_MLV_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'CEN_MLV_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -47,7 +47,7 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 		return;
 	}
 
-	// Load ACF's Select2-based field UI for the group-number multi-select.
+	// Load ACF's Select2-based field UI for the roster-filter multi-selects.
 	if ( function_exists( 'acf_enqueue_scripts' ) ) {
 		acf_enqueue_scripts();
 	}
@@ -74,9 +74,9 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 			'searchNonce' => wp_create_nonce( 'cen_mlv_search_members' ),
 			'strings'     => array(
 				'loading'           => __( 'Loading members...', 'cen-member-list-pdf' ),
-				'loadError'         => __( 'The selected groups could not be loaded.', 'cen-member-list-pdf' ),
+				'loadError'         => __( 'The selected filters could not be loaded.', 'cen-member-list-pdf' ),
 				'searchError'       => __( 'Member search failed.', 'cen-member-list-pdf' ),
-				'chooseGroup'       => __( 'Select at least one group number.', 'cen-member-list-pdf' ),
+				'chooseFilter'      => __( 'Select at least one group number or local board.', 'cen-member-list-pdf' ),
 				'empty'             => __( 'No members or companies are selected yet.', 'cen-member-list-pdf' ),
 				'oneMember'         => __( '1 list entry selected', 'cen-member-list-pdf' ),
 				'manyMembers'       => __( '%d list entries selected', 'cen-member-list-pdf' ),
@@ -101,33 +101,121 @@ function cen_mlv_enqueue_admin_assets( $hook_suffix ) {
 }
 
 /**
+ * Find an ACF field by its field name, including nested fields.
+ *
+ * @param array<int,array<string,mixed>> $fields     ACF fields.
+ * @param string                         $field_name  Field name.
+ * @param string                         $field_label Optional field label.
+ * @return array<string,mixed>
+ */
+function cen_mlv_find_acf_field_by_name( $fields, $field_name, $field_label = '' ) {
+	foreach ( $fields as $field ) {
+		if ( ! is_array( $field ) ) {
+			continue;
+		}
+
+		$name_matches = isset( $field['name'] ) && $field_name === (string) $field['name'];
+		$label_matches = '' !== $field_label && isset( $field['label'] ) && 0 === strcasecmp( $field_label, cen_mlv_clean_text( $field['label'] ) );
+		if ( $name_matches || $label_matches ) {
+			return $field;
+		}
+
+		if ( ! empty( $field['sub_fields'] ) && is_array( $field['sub_fields'] ) ) {
+			$match = cen_mlv_find_acf_field_by_name( $field['sub_fields'], $field_name, $field_label );
+			if ( ! empty( $match ) ) {
+				return $match;
+			}
+		}
+	}
+
+	return array();
+}
+
+/**
+ * Return an ACF field definition, discovering it by name when no key is known.
+ *
+ * @param string $field_name  ACF field name.
+ * @param string $field_key   Optional ACF field key.
+ * @param string $field_label Optional ACF field label.
+ * @return array<string,mixed>
+ */
+function cen_mlv_get_acf_field_definition( $field_name, $field_key = '', $field_label = '' ) {
+	static $field_cache = array();
+	$cache_key = $field_name . '|' . $field_key . '|' . $field_label;
+	if ( array_key_exists( $cache_key, $field_cache ) ) {
+		return $field_cache[ $cache_key ];
+	}
+
+	if ( '' !== $field_key && function_exists( 'get_field_object' ) ) {
+		$field = get_field_object( $field_key, false, false, false );
+		if ( is_array( $field ) ) {
+			$field_cache[ $cache_key ] = $field;
+			return $field_cache[ $cache_key ];
+		}
+	}
+
+	if ( ! function_exists( 'acf_get_field_groups' ) || ! function_exists( 'acf_get_fields' ) ) {
+		$field_cache[ $cache_key ] = array();
+		return $field_cache[ $cache_key ];
+	}
+
+	foreach ( (array) acf_get_field_groups() as $field_group ) {
+		$fields = acf_get_fields( $field_group );
+		if ( ! is_array( $fields ) ) {
+			continue;
+		}
+
+		$field = cen_mlv_find_acf_field_by_name( $fields, $field_name, $field_label );
+		if ( ! empty( $field ) ) {
+			$field_cache[ $cache_key ] = $field;
+			return $field_cache[ $cache_key ];
+		}
+	}
+
+	$field_cache[ $cache_key ] = array();
+	return $field_cache[ $cache_key ];
+}
+
+/**
+ * Return live choices from an ACF select-style field.
+ *
+ * @param string $field_name  ACF field name.
+ * @param string $field_key   Optional ACF field key.
+ * @param string $field_label Optional ACF field label.
+ * @return array<string,string>
+ */
+function cen_mlv_get_acf_choice_options( $field_name, $field_key = '', $field_label = '' ) {
+	$field = cen_mlv_get_acf_field_definition( $field_name, $field_key, $field_label );
+	$options = isset( $field['choices'] ) && is_array( $field['choices'] ) ? $field['choices'] : array();
+	$clean_options = array();
+
+	foreach ( $options as $value => $label ) {
+		$value = cen_mlv_normalize_filter_value( $value );
+		if ( '' === $value ) {
+			continue;
+		}
+
+		$label = cen_mlv_clean_text( $label );
+		$clean_options[ $value ] = '' !== $label ? $label : $value;
+	}
+
+	uksort( $clean_options, 'strnatcasecmp' );
+
+	return $clean_options;
+}
+
+/**
  * Return the selectable ACF group numbers.
  *
  * @return array<string,string>
  */
 function cen_mlv_get_group_number_options() {
 	$field_key = (string) apply_filters( 'cen_mlv_group_number_acf_field_key', 'field_6a7ddc6aed794' );
-	$options = array();
-
-	if ( function_exists( 'get_field_object' ) && '' !== $field_key ) {
-		$field = get_field_object( $field_key, false, false, false );
-		if ( is_array( $field ) && isset( $field['choices'] ) && is_array( $field['choices'] ) ) {
-			$options = $field['choices'];
-		}
-	}
-
-	if ( empty( $options ) ) {
-		$numbers = array(
-			'10AE', '10HR', '10SC', '10XC', '10XCIO', '10XEM', '10XM', '10XVM', '11XM',
-			'1XXCO', '20AX', '20EX', '20GC', '20GM', '20VP', '20XC', '20XM', '21XM',
-			'21XPS', '500M', '5MBD', '5XM', 'CEO100', 'CEO50', 'CFO100',
-		);
-		$options = array_combine( $numbers, $numbers );
-	}
+	$options = cen_mlv_get_acf_choice_options( 'group_number', $field_key );
 
 	$clean_options = array();
 	foreach ( (array) apply_filters( 'cen_mlv_group_number_options', $options ) as $value => $label ) {
-		$number = cen_mlv_normalize_group_number( is_int( $value ) ? $label : $value );
+		$number = cen_mlv_normalize_group_number( $value );
 		if ( '' === $number ) {
 			continue;
 		}
@@ -156,6 +244,46 @@ function cen_mlv_get_group_number_options() {
 }
 
 /**
+ * Return the selectable local boards from the live ACF field definition.
+ *
+ * The field is discovered by name because its generated ACF key may differ
+ * between environments. A key can still be supplied with the filter below.
+ *
+ * @return array<string,string>
+ */
+function cen_mlv_get_local_board_options() {
+	$field_key = (string) apply_filters( 'cen_mlv_local_board_acf_field_key', '' );
+	$options = cen_mlv_get_acf_choice_options( 'local_board', $field_key, 'Local Board' );
+	$filtered_options = (array) apply_filters( 'cen_mlv_local_board_options', $options );
+	$clean_options = array();
+	foreach ( $filtered_options as $value => $label ) {
+		$value = cen_mlv_normalize_filter_value( $value );
+		if ( '' === $value ) {
+			continue;
+		}
+
+		$label = cen_mlv_clean_text( $label );
+		$clean_options[ $value ] = '' !== $label ? $label : $value;
+	}
+	uksort( $clean_options, 'strnatcasecmp' );
+
+	return $clean_options;
+}
+
+/**
+ * Return the discovered local-board field's user-meta key.
+ *
+ * @return string
+ */
+function cen_mlv_get_local_board_meta_key() {
+	$field_key = (string) apply_filters( 'cen_mlv_local_board_acf_field_key', '' );
+	$field = cen_mlv_get_acf_field_definition( 'local_board', $field_key, 'Local Board' );
+	$meta_key = isset( $field['name'] ) ? (string) $field['name'] : 'local_board';
+
+	return (string) apply_filters( 'cen_mlv_local_board_meta_key', $meta_key );
+}
+
+/**
  * Normalize a WordPress text value for display and export.
  *
  * @param mixed $value Source value.
@@ -179,6 +307,16 @@ function cen_mlv_normalize_group_number( $value ) {
 	$number = strtoupper( cen_mlv_clean_text( $value ) );
 
 	return (string) preg_replace( '/[^A-Z0-9_-]/', '', $number );
+}
+
+/**
+ * Normalize an ACF choice value without changing its meaning.
+ *
+ * @param mixed $value Choice value.
+ * @return string
+ */
+function cen_mlv_normalize_filter_value( $value ) {
+	return cen_mlv_clean_text( $value );
 }
 
 /**
@@ -237,6 +375,36 @@ function cen_mlv_get_user_group_numbers( $user_id ) {
 	$numbers = array_values( array_unique( array_filter( array_map( 'cen_mlv_normalize_group_number', $raw_numbers ) ) ) );
 
 	return (array) apply_filters( 'cen_mlv_user_group_numbers', $numbers, absint( $user_id ) );
+}
+
+/**
+ * Return all local boards assigned to a user.
+ *
+ * @param int $user_id User ID.
+ * @return string[]
+ */
+function cen_mlv_get_user_local_boards( $user_id ) {
+	$field_name = cen_mlv_get_local_board_meta_key();
+	$field = cen_mlv_get_acf_field_definition( 'local_board', (string) apply_filters( 'cen_mlv_local_board_acf_field_key', '' ), 'Local Board' );
+	$field_key = isset( $field['key'] ) ? (string) $field['key'] : '';
+	$value = cen_mlv_get_acf_user_value( $user_id, $field_name, $field_key );
+	$value = is_string( $value ) ? maybe_unserialize( $value ) : $value;
+	$raw_boards = array();
+
+	if ( is_array( $value ) ) {
+		array_walk_recursive(
+			$value,
+			static function ( $board ) use ( &$raw_boards ) {
+				$raw_boards[] = $board;
+			}
+		);
+	} elseif ( is_scalar( $value ) ) {
+		$raw_boards[] = $value;
+	}
+
+	$boards = array_values( array_unique( array_filter( array_map( 'cen_mlv_normalize_filter_value', $raw_boards ) ) ) );
+
+	return (array) apply_filters( 'cen_mlv_user_local_boards', $boards, absint( $user_id ) );
 }
 
 /**
@@ -468,7 +636,7 @@ function cen_mlv_verify_ajax_request( $nonce_action ) {
 }
 
 /**
- * Load and merge members assigned to the selected ACF group numbers.
+ * Load and merge members assigned to selected ACF group numbers or local boards.
  */
 function cen_mlv_ajax_load_members() {
 	cen_mlv_verify_ajax_request( 'cen_mlv_load_members' );
@@ -477,22 +645,40 @@ function cen_mlv_ajax_load_members() {
 	$requested_numbers = array_values( array_unique( array_filter( array_map( 'cen_mlv_normalize_group_number', $requested_numbers ) ) ) );
 	$allowed_numbers = array_keys( cen_mlv_get_group_number_options() );
 	$group_numbers = array_values( array_intersect( $requested_numbers, $allowed_numbers ) );
-	if ( empty( $group_numbers ) ) {
-		wp_send_json_error( array( 'message' => __( 'Select at least one valid group number.', 'cen-member-list-pdf' ) ), 400 );
+
+	$requested_boards = isset( $_GET['local_boards'] ) ? (array) wp_unslash( $_GET['local_boards'] ) : array();
+	$requested_boards = array_values( array_unique( array_filter( array_map( 'cen_mlv_normalize_filter_value', $requested_boards ) ) ) );
+	$local_board_options = cen_mlv_get_local_board_options();
+	$local_boards = array_values( array_intersect( $requested_boards, array_keys( $local_board_options ) ) );
+	if ( empty( $group_numbers ) && empty( $local_boards ) ) {
+		wp_send_json_error( array( 'message' => __( 'Select at least one valid group number or local board.', 'cen-member-list-pdf' ) ), 400 );
 	}
 
-	$group_meta_query = array( 'relation' => 'OR' );
+	$filter_meta_query = array( 'relation' => 'OR' );
 	$group_meta_key = (string) apply_filters( 'cen_mlv_group_number_meta_key', 'group_number' );
 	foreach ( $group_numbers as $group_number ) {
 		// ACF multi-selects are serialized; equality also supports legacy scalar values.
-		$group_meta_query[] = array(
+		$filter_meta_query[] = array(
 			'key'     => $group_meta_key,
 			'value'   => '"' . $group_number . '"',
 			'compare' => 'LIKE',
 		);
-		$group_meta_query[] = array(
+		$filter_meta_query[] = array(
 			'key'     => $group_meta_key,
 			'value'   => $group_number,
+			'compare' => '=',
+		);
+	}
+	$local_board_meta_key = cen_mlv_get_local_board_meta_key();
+	foreach ( $local_boards as $local_board ) {
+		$filter_meta_query[] = array(
+			'key'     => $local_board_meta_key,
+			'value'   => '"' . $local_board . '"',
+			'compare' => 'LIKE',
+		);
+		$filter_meta_query[] = array(
+			'key'     => $local_board_meta_key,
+			'value'   => $local_board,
 			'compare' => '=',
 		);
 	}
@@ -503,7 +689,7 @@ function cen_mlv_ajax_load_members() {
 			'order'       => 'ASC',
 			'fields'      => array( 'ID', 'display_name', 'user_email' ),
 			'count_total' => false,
-			'meta_query'  => $group_meta_query,
+			'meta_query'  => $filter_meta_query,
 		)
 	);
 	$items = array();
@@ -515,9 +701,17 @@ function cen_mlv_ajax_load_members() {
 		}
 
 		$matching_numbers = array_values( array_intersect( $group_numbers, cen_mlv_get_user_group_numbers( $user_id ) ) );
-		if ( ! empty( $matching_numbers ) ) {
+		$matching_boards = array_values( array_intersect( $local_boards, cen_mlv_get_user_local_boards( $user_id ) ) );
+		if ( ! empty( $matching_numbers ) || ! empty( $matching_boards ) ) {
+			$sources = array();
+			foreach ( $matching_numbers as $number ) {
+				$sources[] = sprintf( __( 'Group: %s', 'cen-member-list-pdf' ), $number );
+			}
+			foreach ( $matching_boards as $board ) {
+				$sources[] = sprintf( __( 'Local Board: %s', 'cen-member-list-pdf' ), $local_board_options[ $board ] );
+			}
 			$seen_user_ids[ $user_id ] = true;
-			$items[] = cen_mlv_get_member_payload( $user, $matching_numbers );
+			$items[] = cen_mlv_get_member_payload( $user, $sources );
 		}
 	}
 	usort( $items, 'cen_mlv_compare_member_payloads' );
@@ -660,19 +854,25 @@ function cen_mlv_render_admin_page() {
 	}
 
 	$group_numbers = cen_mlv_get_group_number_options();
+	$local_boards = cen_mlv_get_local_board_options();
+	$local_board_field = cen_mlv_get_acf_field_definition( 'local_board', (string) apply_filters( 'cen_mlv_local_board_acf_field_key', '' ), 'Local Board' );
+	$local_board_field_name = isset( $local_board_field['name'] ) ? (string) $local_board_field['name'] : 'local_board';
+	$local_board_field_key = isset( $local_board_field['key'] ) ? (string) $local_board_field['key'] : '';
+	$has_roster_filters = ! empty( $group_numbers ) || ! empty( $local_boards );
 	?>
 	<div class="wrap cen-mlv-wrap">
 		<h1><?php esc_html_e( 'Member List Creator', 'cen-member-list-pdf' ); ?></h1>
-		<p class="cen-mlv-intro"><?php esc_html_e( 'Select profile group numbers, add individual members or companies, review the combined list, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
+		<p class="cen-mlv-intro"><?php esc_html_e( 'Select profile group numbers or local boards, add individual members or companies, review the combined list, and download the membership roster PDF.', 'cen-member-list-pdf' ); ?></p>
 
-		<?php if ( empty( $group_numbers ) ) : ?>
-			<div class="notice notice-warning"><p><?php esc_html_e( 'No group-number choices are configured.', 'cen-member-list-pdf' ); ?></p></div>
+		<?php if ( ! $has_roster_filters ) : ?>
+			<div class="notice notice-warning"><p><?php esc_html_e( 'No Group Number or Local Board choices are configured in ACF.', 'cen-member-list-pdf' ); ?></p></div>
 		<?php endif; ?>
 
 		<div class="cen-mlv-builder">
 			<section class="cen-mlv-card" aria-labelledby="cen-mlv-groups-heading">
-				<h2 id="cen-mlv-groups-heading"><?php esc_html_e( '1. Choose group numbers', 'cen-member-list-pdf' ); ?></h2>
-				<p class="description" id="cen-mlv-group-help"><?php esc_html_e( 'Search or click to add one or more values from the Group Number field.', 'cen-member-list-pdf' ); ?></p>
+				<h2 id="cen-mlv-groups-heading"><?php esc_html_e( '1. Choose groups or local boards', 'cen-member-list-pdf' ); ?></h2>
+				<p class="description" id="cen-mlv-group-help"><?php esc_html_e( 'Search or click to add one or more values from the live ACF fields.', 'cen-member-list-pdf' ); ?></p>
+				<label class="cen-mlv-filter-label" for="cen-mlv-groups"><?php esc_html_e( 'Group Number', 'cen-member-list-pdf' ); ?></label>
 				<div class="acf-field acf-field-select acf-field-6a7ddc6aed794 cen-mlv-group-number-field" data-name="group_number" data-type="select" data-key="field_6a7ddc6aed794">
 					<div class="acf-input">
 						<select
@@ -695,9 +895,32 @@ function cen_mlv_render_admin_page() {
 						</select>
 					</div>
 				</div>
+				<label class="cen-mlv-filter-label" for="cen-mlv-local-boards"><?php esc_html_e( 'Local Board', 'cen-member-list-pdf' ); ?></label>
+				<div class="acf-field acf-field-select cen-mlv-group-number-field" data-name="<?php echo esc_attr( $local_board_field_name ); ?>" data-type="select"<?php echo '' !== $local_board_field_key ? ' data-key="' . esc_attr( $local_board_field_key ) . '"' : ''; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Attribute components are escaped. ?>>
+					<div class="acf-input">
+						<select
+							id="cen-mlv-local-boards"
+							class="cen-mlv-groups"
+							name="cen_mlv_local_boards[]"
+							multiple
+							size="12"
+							data-ui="1"
+							data-multiple="1"
+							data-placeholder="<?php echo esc_attr__( 'Select local boards', 'cen-member-list-pdf' ); ?>"
+							data-allow_null="1"
+							data-ajax="0"
+							aria-describedby="cen-mlv-group-help"
+							<?php disabled( empty( $local_boards ) ); ?>
+						>
+							<?php foreach ( $local_boards as $local_board => $label ) : ?>
+								<option value="<?php echo esc_attr( $local_board ); ?>"><?php echo esc_html( $label ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+				</div>
 				<p class="description"><?php esc_html_e( 'Prospects and users with no Member Type are excluded. BuddyBoss suspension status is ignored.', 'cen-member-list-pdf' ); ?></p>
 				<p class="cen-mlv-actions">
-					<button type="button" class="button button-primary" id="cen-mlv-load-groups" <?php disabled( empty( $group_numbers ) ); ?>><?php esc_html_e( 'Load selected group numbers', 'cen-member-list-pdf' ); ?></button>
+					<button type="button" class="button button-primary" id="cen-mlv-load-groups" <?php disabled( ! $has_roster_filters ); ?>><?php esc_html_e( 'Load selected filters', 'cen-member-list-pdf' ); ?></button>
 					<button type="button" class="button" id="cen-mlv-clear"><?php esc_html_e( 'Clear list', 'cen-member-list-pdf' ); ?></button>
 				</p>
 				<div id="cen-mlv-load-status" class="cen-mlv-status" role="status" aria-live="polite"></div>
